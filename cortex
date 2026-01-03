@@ -63,10 +63,10 @@ CONF_LOCATION = CONF_DIR + "/config"
 
 GETCH_TIMEOUT = 400
 
-BASE_URI = "http://reddit.com/"
-INBOX_URI = BASE_URI + "message/inbox"
-SUB_URI = BASE_URI + "r/%s/"
-SEARCH_URI = BASE_URI + "search.json?q=%s&sort=new"
+BASE_URI   = "https://www.reddit.com/"
+INBOX_URI  = BASE_URI + "message/inbox.json?raw_json=1"
+SUB_URI    = BASE_URI + "r/%s/.json?raw_json=1"
+SEARCH_URI = BASE_URI + "search.json?q=%s&sort=new&raw_json=1"
 
 COLOR_NAME = {
     "black": 0,
@@ -244,7 +244,7 @@ def getcommand(name, cmds=None):
         global commands
         cmd = commands
     else:
-        cmd = cmds
+        cmd = cmdsopen
 
     # Exact match
     if name in cmd:
@@ -323,16 +323,21 @@ def seen_write():
 def check_inbox(interface):
     try:
         req = Request(Config["inbox"])
-        ua = Config.get("user-agent", "{} - {}".format(
-            APPLICATION_NAME, APPLICATION_VERSION))
-        req.add_header('User-agent', ua)
+        # Use a modern browser User-Agent so Reddit allows the request
+        req.add_header(
+            "User-Agent",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+        )
+        req.add_header("Accept", "application/json")
+        req.add_header("Connection", "keep-alive")
 
         resp = urlopen(req).read().decode("utf-8")
         data = json.loads(resp)["data"]["children"]
         interface.messages = len(data)
-    except:
+    except Exception as e:
+        # optional: print("Inbox fetch failed:", e)
         pass
-# }}}
 # }}}
 
 # {{{ Data
@@ -354,9 +359,14 @@ class Data(object):
     def _load(self, use_thread=True):
         try:
             req = Request(self.uri)
-            ua = Config.get("user-agent", "{} - {}".format(
-                APPLICATION_NAME, APPLICATION_VERSION))
-            req.add_header('User-agent', ua)
+            # Use a real browser User-Agent so Reddit allows the request
+            req.add_header(
+                "User-Agent",
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+            )
+            req.add_header("Accept", "application/json")
+            req.add_header("Connection", "keep-alive")
 
             resp = urlopen(req).read().decode("utf-8")
             data = json.loads(resp)["data"]["children"]
@@ -364,8 +374,9 @@ class Data(object):
         except Exception as e:
             self.loading = False
             self.need_update = True
-
-            self.error = "Error opening reddit json file at %s. %s [Line %s]." % (self.uri, e, sys.exc_info()[-1].tb_lineno)
+            self.error = "Error opening reddit json file at %s. %s [Line %s]." % (
+                self.uri, e, sys.exc_info()[-1].tb_lineno
+            )
             return
 
         for datum in data:
@@ -804,10 +815,31 @@ def cm_update(data, interface):
 
 @command(name="open")
 def cm_open(data, interface):
-    interface.entry.open()
+    """
+    Open the Reddit post itself in the browser (the selected post).
+    """
+    entry = interface.entry
+    if not entry:
+        return
+
+    # Get the actual post permalink from entry.data
+    permalink = entry.data.get("permalink")
+    if permalink:
+        # Construct full Reddit URL
+        full_url = permalink
+        if full_url.startswith("/"):
+            full_url = BASE_URI.rstrip("/") + full_url
+        browseropen(full_url)
+
     interface.need_update = True
     if not BackgroundBrowser:
         interface.need_redraw = True
+
+
+
+
+
+
 
 @command(name="mark-read")
 def cm_mark_read(data, interface):
@@ -954,7 +986,7 @@ def main():
         print(HELPTEXT)
     else:
         if len(sys.argv) > 1:
-            data = Data((SUB_URI % sys.argv[1])+".json")
+            data = Data((SUB_URI % sys.argv[1])+".json?raw_json=1")
             data.title = sys.argv[1]
         else:
             data = Data(Config["frontpage"])
